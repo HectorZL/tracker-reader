@@ -9,7 +9,7 @@ import os
 from playwright_stealth import stealth_sync
 
 # Configuración Headless: Toma el valor de la variable de entorno o False por defecto
-HEADLESS = os.getenv("HEADLESS", "False").lower() == "true"
+HEADLESS = True
 MIN_CONFIDENCE = 60
 
 def do_login(user: UserLogin) -> str:
@@ -21,8 +21,35 @@ def do_login(user: UserLogin) -> str:
     session_file = get_session_file(user_id)
     
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=HEADLESS)
-        context = browser.new_context()
+        browser = p.chromium.launch(
+            headless=HEADLESS,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-dev-shm-usage",
+                "--disable-web-security",
+                "--disable-features=IsolateOrigins,site-per-process"
+            ]
+        )
+        context = browser.new_context(
+            viewport={'width': 1920, 'height': 1080},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            locale="en-US",
+            timezone_id="America/New_York",
+            permissions=["geolocation"],
+            geolocation={"latitude": 40.7128, "longitude": -74.0060},
+            extra_http_headers={
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "Upgrade-Insecure-Requests": "1",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-User": "?1"
+            }
+        )
         page = context.new_page()
         stealth_sync(page) # Activar modo sigilo
         
@@ -74,7 +101,17 @@ def run_scraper(data: LibroSincro):
     session_file = get_session_file(data.user_id)
     
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=HEADLESS)
+        browser = p.chromium.launch(
+            headless=HEADLESS,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-dev-shm-usage",
+                "--disable-web-security",
+                "--disable-features=IsolateOrigins,site-per-process"
+            ]
+        )
         
         # Cargar sesión
         try:
@@ -83,7 +120,22 @@ def run_scraper(data: LibroSincro):
             # User Agent común para evitar bloqueos
             context = browser.new_context(
                 storage_state=session_file,
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                viewport={'width': 1920, 'height': 1080},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                locale="en-US",
+                timezone_id="America/New_York",
+                permissions=["geolocation"],
+                geolocation={"latitude": 40.7128, "longitude": -74.0060},
+                extra_http_headers={
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "Accept-Encoding": "gzip, deflate, br",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                    "Upgrade-Insecure-Requests": "1",
+                    "Sec-Fetch-Dest": "document",
+                    "Sec-Fetch-Mode": "navigate",
+                    "Sec-Fetch-Site": "none",
+                    "Sec-Fetch-User": "?1"
+                }
             )
             print(f"INFO: Sesión cargada para usuario {data.user_id}")
         except Exception as e:
