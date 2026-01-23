@@ -128,6 +128,6 @@ if __name__ == "__main__":
     # Obtener puerto desde variable de entorno (Render) o usar 8000 por defecto
     port = int(os.getenv("PORT", 8000))
     
-    # Iniciar servidor
+    # Iniciar servidor ##
     print(f"🚀 Servidor iniciado en http://0.0.0.0:{port}")
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True, loop="asyncio")
