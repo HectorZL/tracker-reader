@@ -27,7 +27,7 @@ Completa los siguientes campos:
 | **Region** | Selecciona la región más cercana |
 | **Branch** | `main` (o tu rama principal) |
 | **Runtime** | `Python 3` |
-| **Build Command** | `pip install -r requirements.txt && playwright install chromium && playwright install-deps` |
+| **Build Command** | `chmod +x install_playwright.sh && ./install_playwright.sh` |
 | **Start Command** | `uvicorn main:app --host 0.0.0.0 --port $PORT` |
 | **Instance Type** | `Free` |
 
@@ -39,7 +39,11 @@ En la sección **"Environment"**, añade las siguientes variables:
 |-----|-------|-------------|
 | `HEADLESS` | `True` | Ejecuta Playwright en modo headless (sin UI) |
 | `PYTHON_VERSION` | `3.11.0` | Versión de Python a usar |
+| `PLAYWRIGHT_BROWSERS_PATH` | `0` | **CRÍTICO**: Instala navegadores en ubicación por defecto |
+| `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` | `0` | **CRÍTICO**: NO omite la descarga del navegador |
 | `RENDER_EXTERNAL_URL` | `https://tracker-reader.onrender.com` | URL de tu app (opcional, ya está configurada por defecto) |
+
+> **⚠️ IMPORTANTE**: Las variables `PLAYWRIGHT_BROWSERS_PATH` y `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` son **CRÍTICAS** para que Playwright funcione correctamente en Render. Sin ellas, obtendrás el error "Executable doesn't exist".
 
 > **Nota**: La variable `RENDER_EXTERNAL_URL` es opcional. El código ya tiene configurada la URL `https://tracker-reader.onrender.com` por defecto.
 
@@ -143,13 +147,29 @@ Una vez desplegada la API, configura el plugin de KOReader:
 3. Actualiza la variable de entorno `RENDER_EXTERNAL_URL`
 4. Redeploy manual si es necesario
 
-### Error: "playwright install-deps failed"
+### Error: "playwright install chromium" failed
 
 **Causa**: Render Free Tier tiene limitaciones de memoria.
 
 **Solución**:
 1. Intenta redeploy (a veces funciona en el segundo intento)
 2. Si persiste, considera usar el plan Starter ($7/mes)
+
+### Error: "Executable doesn't exist at ..."
+
+**Causa**: Playwright no instaló correctamente el navegador Chromium.
+
+**Solución**:
+1. Verifica que el **Build Command** en Render sea exactamente:
+   ```
+   chmod +x install_playwright.sh && ./install_playwright.sh
+   ```
+2. Revisa los logs de build en Render para confirmar que se ejecutaron:
+   - ✅ `playwright install chromium`
+   - ✅ `playwright install-deps chromium`
+3. Si el error persiste, agrega esta variable de entorno:
+   - `PLAYWRIGHT_BROWSERS_PATH`: `0`
+4. Haz un **Manual Deploy** desde el dashboard de Render
 
 ### Las sesiones se pierden constantemente
 

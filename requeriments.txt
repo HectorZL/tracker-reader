@@ -1,6 +1,0 @@
-fastapi
-uvicorn
-playwright
-playwright-stealth
-thefuzz
-python-Levenshtein
