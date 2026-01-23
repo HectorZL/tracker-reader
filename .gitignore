@@ -4,7 +4,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
+tracker_hector.koplugin/
 # Entornos virtuales
 venv/
 .env

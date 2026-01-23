@@ -6,6 +6,9 @@ from scraper import do_login, run_scraper
 import uvicorn
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import httpx
+import os
+from datetime import datetime
 
 # Inicializar aplicación FastAPI
 app = FastAPI(
@@ -66,6 +69,60 @@ async def sync_progress(libro: LibroSincro, background_tasks: BackgroundTasks):
         "user_id": libro.user_id,
         "message": "Sincronización iniciada en segundo plano"
     }
+
+@app.get("/ping")
+async def ping():
+    """
+    Endpoint de health check para mantener el servidor activo.
+    Render Free Tier suspende el servidor después de 15 minutos de inactividad.
+    """
+    return {
+        "status": "alive",
+        "timestamp": datetime.now().isoformat(),
+        "message": "Server is running"
+    }
+
+# Variable global para controlar el auto-ping
+auto_ping_task = None
+
+async def keep_alive():
+    """
+    Tarea en background que hace ping a sí mismo cada 10 minutos
+    para evitar que Render Free Tier suspenda el servidor.
+    """
+    # Obtener la URL del servidor desde variable de entorno o usar localhost
+    server_url = os.getenv("RENDER_EXTERNAL_URL", "http://localhost:8000")
+    
+    async with httpx.AsyncClient() as client:
+        while True:
+            try:
+                await asyncio.sleep(100)  # Esperar 10 minutos (600 segundos)
+                response = await client.get(f"{server_url}/ping", timeout=10.0)
+                print(f"🏓 Auto-ping exitoso: {response.status_code} - {datetime.now().isoformat()}")
+            except Exception as e:
+                print(f"⚠️ Error en auto-ping: {str(e)}")
+
+@app.on_event("startup")
+async def startup_event():
+    """
+    Evento que se ejecuta al iniciar el servidor.
+    Inicia la tarea de auto-ping en background.
+    """
+    global auto_ping_task
+    auto_ping_task = asyncio.create_task(keep_alive())
+    print("✅ Auto-ping activado - El servidor se mantendrá activo")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """
+    Evento que se ejecuta al apagar el servidor.
+    Cancela la tarea de auto-ping.
+    """
+    global auto_ping_task
+    if auto_ping_task:
+        auto_ping_task.cancel()
+        print("🛑 Auto-ping detenido")
+
 
 if __name__ == "__main__":
     # Iniciar servidor
