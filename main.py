@@ -115,42 +115,110 @@ def run_scraper(data: LibroSincro):
                 f.write(search_html)
             print("INFO: HTML de resultados guardado en search_results_debug.html")
             
-            # 3. Validación de Resultados (Fuzzy Matching)
-            first_result_selector = ".bookTitle span"
+            # 3. Validación de Resultados (Fuzzy Matching Avanzado)
+            print("INFO: Analizando los primeros 5 resultados para encontrar la mejor coincidencia...")
             
-            # Intentar encontrar el selector con timeout más largo
-            try:
-                page.wait_for_selector(first_result_selector, timeout=15000)
-                titulo_encontrado = page.inner_text(first_result_selector)
+            # Script para extraer datos de los primeros 5 resultados
+            # Devuelve una lista de objetos {index, title, author, element_found}
+            # Nota: element_found no se puede devolver, así que devolveremos índices y luego seleccionaremos
+            candidates_data = page.evaluate('''() => {
+                const results = [];
+                // Intentar selector de lista y tabla
+                const rows = document.querySelectorAll('tr[itemtype*="Book"]');
+                const listItems = document.querySelectorAll('li.book');
                 
-                # Limpiar el título encontrado (quitar lo que está entre paréntesis como "(Series, #1)")
-                titulo_limpio = titulo_encontrado.split('(')[0].strip()
+                const elements = rows.length > 0 ? rows : listItems;
                 
-                # Usar token_set_ratio que es más flexible con palabras extra o diferente orden
-                # Esto permitirá que "El Psicoanalista" coincida con "El Psicoanalista John Katzenbach"
-                score = fuzz.token_set_ratio(data.titulo, titulo_limpio)
+                // Analizar hasta 5 resultados
+                for (let i = 0; i < Math.min(elements.length, 5); i++) {
+                    const el = elements[i];
+                    
+                    // Extraer título
+                    const titleEl = el.querySelector('.bookTitle span') || el.querySelector('.bookTitle');
+                    const title = titleEl ? titleEl.innerText : "";
+                    
+                    // Extraer autor
+                    const authorEl = el.querySelector('.authorName span') || el.querySelector('.authorName');
+                    const author = authorEl ? authorEl.innerText : "";
+                    
+                    results.push({
+                        index: i,
+                        title: title,
+                        author: author,
+                        is_table: rows.length > 0
+                    });
+                }
+                return results;
+            }''')
+            
+            best_match = None
+            best_score = 0
+            best_element_handle = None
+            
+            print(f"INFO: Candidatos encontrados: {len(candidates_data)}")
+            
+            for candidate in candidates_data:
+                cand_title = candidate['title']
+                cand_author = candidate['author']
                 
-                if score >= MIN_CONFIDENCE:
-                    print(f"MATCH: '{titulo_limpio}' coincide con '{data.titulo}' ({score}%)")
-                    
-                    # 4. Actualizar progreso desde los resultados de búsqueda (SIN ir a la página del libro)
-                    # Goodreads puede mostrar resultados en dos formatos: lista (li.book) o tabla (tr)
-                    
-                    # Intentar primero con formato de lista
-                    first_book_item_element = page.query_selector('li.book')
-                    
-                    if not first_book_item_element:
-                        # Si no hay li.book, buscar formato de tabla
-                        print("INFO: No se encontró formato de lista, buscando formato de tabla...")
-                        first_book_item_element = page.query_selector('tr[itemtype*="Book"]')
-                        
-                        if first_book_item_element:
-                            print("INFO: Encontrado libro en formato de tabla (tr)")
-                        else:
-                            print("ERROR: No se encontró el contenedor del libro en ningún formato")
-                            return
-                    else:
-                        print("INFO: Encontrado libro en formato de lista (li.book)")
+                # Limpieza básica
+                cand_title_clean = cand_title.split('(')[0].strip() # Quitar series info por ahora
+                
+                # Puntaje de Título
+                # Usamos parcial_ratio para el título para permitir subtítulos, pero token_sort para autor
+                title_score = fuzz.token_set_ratio(data.titulo.lower(), cand_title_clean.lower())
+                
+                # Puntaje de Autor
+                author_score = fuzz.token_sort_ratio(data.autor.lower(), cand_author.lower())
+                
+                # Puntaje Total Ponderado
+                # Damos mucho peso al autor para evitar libros de otro autor con mismo nombre
+                # Y penalizamos si es una secuela (ej. #3.5) y no lo pedimos
+                
+                total_score = (title_score * 0.6) + (author_score * 0.4)
+                
+                # Detección de sagas/numéricos (heurística simple)
+                # Si el título candidato tiene números como "#2", "#3.5" y nuestra búsqueda no, penalizar
+                import re
+                saga_number_match = re.search(r'#(\d+(\.\d+)?)', cand_title)
+                user_saga_match = re.search(r'#(\d+(\.\d+)?)', data.titulo)
+                
+                if saga_number_match and not user_saga_match:
+                    # El candidato es una secuela específica, pero el usuario no pidió número
+                    # Si es #1, no penalizamos tanto. Si es #2+, penalizamos.
+                    num = float(saga_number_match.group(1))
+                    if num > 1.0:
+                        print(f"   -> Penalizando candidato '{cand_title}' por ser secuela #{num} no solicitada")
+                        total_score -= 15
+                
+                print(f"   Candidato {candidate['index']}: '{cand_title}' por {cand_author}")
+                print(f"   Scores - Título: {title_score}, Autor: {author_score} -> Total: {total_score}")
+                
+                # Umbral de aceptación y mejor que el anterior
+                if total_score > best_score and total_score >= 60: # Umbral 60 razonable para combinada
+                    best_match = candidate
+                    best_score = total_score
+            
+            if best_match:
+                print(f"MATCH GANADOR: '{best_match['title']}' por {best_match['author']} (Score: {best_score})")
+                
+                # Ahora recuperamos el elemento del DOM correspondiente al ganador
+                if best_match['is_table']:
+                    # Re-seleccionar usando nth-child (recordar que nth-child es 1-based, index es 0-based)
+                    # En tablas a veces hay headers, mejor ir por querySelectorAll y index
+                    first_book_item_element = page.evaluate_handle(f'document.querySelectorAll("tr[itemtype*=\'Book\']")[{best_match["index"]}]')
+                else:
+                    first_book_item_element = page.evaluate_handle(f'document.querySelectorAll("li.book")[{best_match["index"]}]')
+                
+                # Convertir JSHandle a ElementHandle si es necesario (Playwright Python lo maneja usualmente)
+                first_book_item_element = first_book_item_element.as_element()
+                
+                titulo_limpio = best_match['title']
+                
+                if True: # Bloque dummy para mantener indentación del código siguiente
+                    # 4. Actualizar progreso...
+                    pass
+
                     
                     
                     # Extraer el ID del libro (diferente formato según lista o tabla)
@@ -172,121 +240,181 @@ def run_scraper(data: LibroSincro):
                     if not book_id:
                         print("ERROR: No se pudo extraer el book ID")
                         return
-                    
-                    # Buscar el botón .wtrShelfButton dentro de este resultado
-                    shelf_button = first_book_item_element.query_selector('.wtrShelfButton')
-                    
-                    if not shelf_button:
-                        print("ERROR: No se encontró el botón wtrShelfButton")
+                    if not book_id:
+                        print("ERROR: No se pudo extraer el book ID")
                         return
                     
-                    # Hacer click en el botón para mostrar el menú
-                    print("INFO: Haciendo click en wtrShelfButton para mostrar el menú...")
-                    shelf_button.click()
-                    page.wait_for_timeout(1000)
+                    # 5. Detectar estado y actualizar
+                    # Primero verificar si YA está en Currently Reading (para evitar clicks innecesarios)
+                    status_button = first_book_item_element.query_selector('.wtrStatusReadingNow')
                     
-                    # Buscar el botón "Currently Reading" en el menú desplegable
-                    currently_reading_menu_button = first_book_item_element.query_selector('button[value="currently-reading"]')
-                    
-                    if currently_reading_menu_button:
-                        print("INFO: Haciendo click en 'Currently Reading' del menú...")
-                        currently_reading_menu_button.click()
-                        page.wait_for_timeout(2000)
-                        print("INFO: Libro marcado como 'Currently Reading'")
+                    if status_button:
+                        print("INFO: El libro ya está en 'Currently Reading'. Actualizando directamente...")
+                        # Si ya está leyendo, solo hacer hover sobre el contenedor para mostrar el input
+                        # A veces es mejor hacer hover sobre el padre .wtrDown
+                        wtr_down = first_book_item_element.query_selector('.wtrDown')
+                        if wtr_down:
+                            wtr_down.hover()
+                        else:
+                            status_button.hover()
+                            
+                        page.wait_for_timeout(1500)
                         
-                        # Ahora hacer hover sobre el botón de estado para actualizar páginas
-                        # Esperar a que aparezca el botón de "Currently Reading"
+                        # Lógica de actualización de páginas (reutilizable)
+                        update_pages(page, first_book_item_element, data)
+                        
+                    else:
+                        # Si no está leyendo, buscar el botón del menú
+                        print("INFO: El libro no parece estar en 'Currently Reading'. Buscando botón de estante...")
+                        
+                        # Buscar el botón .wtrShelfButton dentro de este resultado
+                        shelf_button = first_book_item_element.query_selector('.wtrShelfButton')
+                        
+                        if not shelf_button:
+                            print("ERROR: No se encontró el botón wtrShelfButton")
+                            return
+                        
+                        # Hacer click en el botón para mostrar el menú
+                        print("INFO: Haciendo click en wtrShelfButton para mostrar el menú...")
+                        shelf_button.click()
                         page.wait_for_timeout(1000)
                         
-                        # Buscar el botón de estado actual
-                        status_button = first_book_item_element.query_selector('.wtrStatusReadingNow')
+                        # Buscar el botón "Currently Reading" en el menú desplegable
+                        currently_reading_menu_button = first_book_item_element.query_selector('button[value="currently-reading"]')
                         
-                        if status_button:
-                            print(f"INFO: Actualizando progreso de página {data.pagina_actual}/{data.total_paginas}...")
+                        if currently_reading_menu_button:
+                            print("INFO: Haciendo click en 'Currently Reading' del menú...")
+                            currently_reading_menu_button.click()
+                            page.wait_for_timeout(2000)
+                            print("INFO: Libro marcado como 'Currently Reading'")
                             
-                            # Hacer hover para mostrar el formulario
-                            status_button.hover()
-                            page.wait_for_timeout(1500)
+                            # Ahora intentar actualizar páginas
+                            # Esperar a que se actualice el estado en la UI
+                            page.wait_for_timeout(1000)
                             
-                            # Extraer el total de páginas del libro en Goodreads
-                            # El formulario muestra algo como "of 528" para el total de páginas
-                            page_text = first_book_item_element.inner_text()
-                            
-                            # Buscar el input de páginas
-                            page_input = first_book_item_element.query_selector('input[name="user_status[page]"]')
-                            
-                            if page_input:
-                                # Extraer el total de páginas de Goodreads del texto del formulario
-                                # Buscar patrón "of XXX"
-                                import re
-                                match = re.search(r'of\s+(\d+)', page_text)
-                                
-                                if match:
-                                    goodreads_total_pages = int(match.group(1))
-                                    print(f"INFO: Total de páginas en Goodreads: {goodreads_total_pages}")
-                                    
-                                    # Calcular la página equivalente en Goodreads
-                                    if data.total_paginas > 0:
-                                        proporcion = data.pagina_actual / data.total_paginas
-                                        goodreads_page = int(proporcion * goodreads_total_pages)
-                                        
-                                        # Asegurar que no exceda el máximo
-                                        goodreads_page = min(goodreads_page, goodreads_total_pages)
-                                        
-                                        print(f"INFO: Calculando página equivalente: {data.pagina_actual}/{data.total_paginas} → {goodreads_page}/{goodreads_total_pages}")
-                                    else:
-                                        goodreads_page = 0
-                                else:
-                                    # Si no se puede extraer, usar directamente la página del usuario
-                                    print("WARNING: No se pudo extraer el total de páginas de Goodreads, usando página directa")
-                                    goodreads_page = data.pagina_actual
-                                
-                                # Hacer click en el toggle para cambiar a modo página si está en porcentaje
-                                toggle_button = first_book_item_element.query_selector('.wtrNewUserStatusProgressTypeToggle')
-                                if toggle_button:
-                                    toggle_text = toggle_button.inner_text().strip()
-                                    if 'page' in toggle_text.lower():
-                                        # Ya está en modo página, no hacer nada
-                                        pass
-                                    else:
-                                        # Está en modo porcentaje, cambiar a página
-                                        print("INFO: Cambiando a modo página...")
-                                        toggle_button.click()
-                                        page.wait_for_timeout(500)
-                                
-                                # Limpiar y llenar el campo de página
-                                page_input.fill('')
-                                page_input.fill(str(goodreads_page))
-                                print(f"INFO: Página actualizada a {goodreads_page}")
-                                
-                                # Hacer click en Submit
-                                submit_button = first_book_item_element.query_selector('button.gr-form--compact__submitButton')
-                                if submit_button:
-                                    submit_button.click()
-                                    page.wait_for_timeout(2000)
-                                    print(f"SUCCESS: Progreso actualizado a página {goodreads_page} de {goodreads_total_pages if match else 'desconocido'}")
-                                else:
-                                    print("WARNING: No se encontró el botón Submit")
-                            else:
-                                print("WARNING: No se encontró el campo de página")
+                            # Buscar el botón de estado actualizado
+                            status_button = first_book_item_element.query_selector('.wtrStatusReadingNow')
+                            if status_button:
+                                status_button.hover()
+                                page.wait_for_timeout(1500)
+                                update_pages(page, first_book_item_element, data)
                         else:
-                            print("WARNING: No se encontró el botón de estado 'Currently Reading'")
-                    else:
-                        print("INFO: El libro no está en 'Currently Reading', marcándolo...")
-                        # El botón no existe, probablemente ya está marcado de otra forma
-                    
-                else:
-                    print(f"ERROR: No se encontró un match confiable ({score}%).")
-                    print(f"Buscado: '{data.titulo}'")
-                    print(f"Encontrado: '{titulo_encontrado}' (Limpio: '{titulo_limpio}')")
-            except Exception as selector_error:
-                print(f"WARNING: No se encontró el selector '{first_result_selector}'. Error: {str(selector_error)}")
-                print("INFO: Revisa el archivo search_results_debug.html para ver la estructura de la página")
+                            print("WARNING: No se encontró la opción 'Currently Reading' en el menú")
+
+            else:
+                print(f"ERROR: No se encontró ningún libro candidato con puntaje suficiente (Min: 60).")
+                print(f"Buscado: '{data.titulo}' - Autor: '{data.autor}'")
+                if len(candidates_data) > 0:
+                    print("Mejores candidatos descartados:")
+                    for c in candidates_data[:3]:
+                        print(f"- {c['title']} ({c['author']})")
+
 
         except Exception as e:
             print(f"CRITICAL ERROR: {str(e)}")
         finally:
             browser.close()
+
+def update_pages(page, container, data):
+    """Función auxiliar para actualizar las páginas manipulando el DOM directamente con JS"""
+    try:
+        # Script JS robusto para hacer todo el proceso
+        js_script = """
+        (container) => {
+            const formContainer = container.querySelector('.wtrFloatingBox.wtrNewUserStatus');
+            if (!formContainer) return { success: false, error: "Contenedor de formulario no encontrado" };
+            
+            // 1. Forzar visibilidad del formulario
+            formContainer.style.display = 'block';
+            formContainer.style.visibility = 'visible';
+            formContainer.style.opacity = '1';
+            
+            // 2. Buscar input de páginas
+            const pageInput = container.querySelector('input[name="user_status[page]"]');
+            if (!pageInput) return { success: false, error: "Input de página no encontrado" };
+            
+            // 3. Extraer total para cálculo (opcional, pero útil)
+            let totalPages = 0;
+            const text = container.innerText || "";
+            const match = text.match(/of\\s+(\\d+)/);
+            if (match) totalPages = parseInt(match[1]);
+            
+            // 4. Calcular página objetivo (pasada como argumento sería mejor, pero calculamos aquí si es necesario)
+            // Nota: Aquí usaremos el valor que pasaremos desde Python
+            
+            return { 
+                success: true, 
+                totalPages: totalPages,
+                inputSelector: 'input[name="user_status[page]"]',
+                submitSelector: 'button.gr-form--compact__submitButton',
+                toggleSelector: '.wtrNewUserStatusProgressTypeToggle'
+            };
+        }
+        """
+        
+        # Ejecutar fase de preparación
+        result = page.evaluate(js_script, container)
+        
+        if not result['success']:
+            print(f"WARNING: Fallo en preparación JS: {result.get('error')}")
+            return
+            
+        goodreads_total_pages = result['totalPages']
+        if goodreads_total_pages > 0:
+             print(f"INFO: Total de páginas detectado en JS: {goodreads_total_pages}")
+        
+        # Calcular página exacta en Python
+        final_page = data.pagina_actual
+        if goodreads_total_pages > 0 and data.total_paginas > 0:
+            proporcion = data.pagina_actual / data.total_paginas
+            final_page = int(proporcion * goodreads_total_pages)
+            final_page = min(final_page, goodreads_total_pages)
+            print(f"INFO: Página calculada: {final_page}")
+            
+        # Ejecutar fase de acción (llenar y enviar)
+        action_script = """
+        (params) => {
+            const container = document.querySelector(params.containerSelector); # Esto no funcionará porque container es un objeto handle
+            // Necesitamos pasar el elemento container de nuevo
+        }
+        """
+        
+        # Usamos evaluate pasando los argumentos necesarios
+        page.evaluate("""
+            ([container, pageValue]) => {
+                const pageInput = container.querySelector('input[name="user_status[page]"]');
+                const submitBtn = container.querySelector('button.gr-form--compact__submitButton');
+                const toggleBtn = container.querySelector('.wtrNewUserStatusProgressTypeToggle');
+                
+                // Asegurar modo página
+                if (toggleBtn && pageInput && !pageInput.offsetParent) {
+                     // Si el input está oculto, intentar toggle
+                     toggleBtn.click();
+                }
+                
+                // Llenar valor
+                if (pageInput) {
+                    pageInput.value = pageValue;
+                    pageInput.dispatchEvent(new Event('change', { bubbles: true }));
+                    pageInput.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+                
+                // Submit
+                if (submitBtn) {
+                    submitBtn.click();
+                }
+            }
+        """, [container, str(final_page)])
+        
+        print(f"SUCCESS: Comando de actualización enviado para página {final_page}")
+        page.wait_for_timeout(2000)
+            
+    except Exception as e:
+        print(f"ERROR actualizando páginas: {str(e)}")
+    except Exception as e:
+        print(f"ERROR actualizando páginas: {str(e)}")
+                    
+
 
 # --- Endpoints ---
 @app.post("/sync")
