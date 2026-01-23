@@ -5,8 +5,11 @@ from models import UserLogin, LibroSincro
 from auth import generate_user_id, get_session_file
 from utils import prepare_form_js, update_pages_js
 import time
+import os
+from playwright_stealth import Stealth
 
-HEADLESS = True  # Cambiar a True en producción
+# Configuración Headless: Toma el valor de la variable de entorno o False por defecto
+HEADLESS = os.getenv("HEADLESS", "False").lower() == "true"
 MIN_CONFIDENCE = 60
 
 def do_login(user: UserLogin) -> str:
@@ -21,6 +24,8 @@ def do_login(user: UserLogin) -> str:
         browser = p.chromium.launch(headless=HEADLESS)
         context = browser.new_context()
         page = context.new_page()
+        Stealth().apply_stealth_sync(page) # Activar modo sigilo
+        
         
         try:
             print(f"INFO: Iniciando login para {user.username}...")
@@ -87,6 +92,8 @@ def run_scraper(data: LibroSincro):
             return
 
         page = context.new_page()
+        Stealth().apply_stealth_sync(page) # Activar modo sigilo
+        
 
         try:
             # 1. Buscar Libro
