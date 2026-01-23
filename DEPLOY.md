@@ -39,9 +39,9 @@ En la sección **"Environment"**, añade las siguientes variables:
 |-----|-------|-------------|
 | `HEADLESS` | `True` | Ejecuta Playwright en modo headless (sin UI) |
 | `PYTHON_VERSION` | `3.11.0` | Versión de Python a usar |
-| `RENDER_EXTERNAL_URL` | `https://tu-app.onrender.com` | URL de tu app (cámbiala después del primer deploy) |
+| `RENDER_EXTERNAL_URL` | `https://tracker-reader.onrender.com` | URL de tu app (opcional, ya está configurada por defecto) |
 
-> **Nota**: Después del primer despliegue, actualiza `RENDER_EXTERNAL_URL` con la URL real que Render te asigne.
+> **Nota**: La variable `RENDER_EXTERNAL_URL` es opcional. El código ya tiene configurada la URL `https://tracker-reader.onrender.com` por defecto.
 
 ### 4. Deploy
 
@@ -57,7 +57,7 @@ Una vez desplegado, verifica que todo funciona:
 
 ### 1. Health Check
 ```bash
-curl https://tu-app.onrender.com/ping
+curl https://tracker-reader.onrender.com/ping
 ```
 
 Deberías recibir:
@@ -71,7 +71,7 @@ Deberías recibir:
 
 ### 2. Documentación Interactiva
 
-Visita `https://tu-app.onrender.com/docs` para ver la documentación automática de FastAPI.
+Visita `https://tracker-reader.onrender.com/docs` para ver la documentación automática de FastAPI.
 
 ---
 
@@ -125,7 +125,7 @@ Una vez desplegada la API, configura el plugin de KOReader:
 
 1. Abre cualquier libro en KOReader
 2. Menú superior → **Hector's Tracker** → **Configurar Servidor**
-3. Ingresa la URL: `https://tu-app.onrender.com`
+3. Ingresa la URL: `https://tracker-reader.onrender.com`
 4. Guarda la configuración
 5. Realiza el login desde el plugin
 

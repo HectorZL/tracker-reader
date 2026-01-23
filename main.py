@@ -90,13 +90,13 @@ async def keep_alive():
     Tarea en background que hace ping a sí mismo cada 10 minutos
     para evitar que Render Free Tier suspenda el servidor.
     """
-    # Obtener la URL del servidor desde variable de entorno o usar localhost
-    server_url = os.getenv("RENDER_EXTERNAL_URL", "http://localhost:8000")
+    # Obtener la URL del servidor desde variable de entorno o usar la URL de producción
+    server_url = os.getenv("RENDER_EXTERNAL_URL", "https://tracker-reader.onrender.com")
     
     async with httpx.AsyncClient() as client:
         while True:
             try:
-                await asyncio.sleep(100)  # Esperar 10 minutos (600 segundos)
+                await asyncio.sleep(600)  # Esperar 10 minutos (600 segundos)
                 response = await client.get(f"{server_url}/ping", timeout=10.0)
                 print(f"🏓 Auto-ping exitoso: {response.status_code} - {datetime.now().isoformat()}")
             except Exception as e:
@@ -125,6 +125,9 @@ async def shutdown_event():
 
 
 if __name__ == "__main__":
+    # Obtener puerto desde variable de entorno (Render) o usar 8000 por defecto
+    port = int(os.getenv("PORT", 8000))
+    
     # Iniciar servidor
-    print("🚀 Servidor iniciado en http://0.0.0.0:8000")
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, loop="asyncio")
+    print(f"🚀 Servidor iniciado en http://0.0.0.0:{port}")
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True, loop="asyncio")

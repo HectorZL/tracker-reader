@@ -1,10 +1,44 @@
+# Archivos de sesión (contienen cookies sensibles)
+sessions/
+*.json
+
+# Archivos temporales de scraping
 /state.json
 *.html
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
-tracker_hector.koplugin/
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
 # Entornos virtuales
 venv/
+env/
+ENV/
+.venv
+
+# Variables de entorno
 .env
+.env.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Playwright
+playwright/.cache/
