@@ -1,2 +1,10 @@
 /state.json
 *.html
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Entornos virtuales
+venv/
+.env
