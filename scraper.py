@@ -6,7 +6,7 @@ from auth import generate_user_id, get_session_file
 from utils import prepare_form_js, update_pages_js
 import time
 
-HEADLESS = False  # Cambiar a True en producción
+HEADLESS = True  # Cambiar a True en producción
 MIN_CONFIDENCE = 60
 
 def do_login(user: UserLogin) -> str:
