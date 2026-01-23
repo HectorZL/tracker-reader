@@ -6,7 +6,7 @@ from auth import generate_user_id, get_session_file
 from utils import prepare_form_js, update_pages_js
 import time
 import os
-from playwright_stealth import Stealth
+from playwright_stealth import stealth_sync
 
 # Configuración Headless: Toma el valor de la variable de entorno o False por defecto
 HEADLESS = os.getenv("HEADLESS", "False").lower() == "true"
@@ -24,7 +24,7 @@ def do_login(user: UserLogin) -> str:
         browser = p.chromium.launch(headless=HEADLESS)
         context = browser.new_context()
         page = context.new_page()
-        Stealth().apply_stealth_sync(page) # Activar modo sigilo
+        stealth_sync(page) # Activar modo sigilo
         
         
         try:
@@ -92,7 +92,7 @@ def run_scraper(data: LibroSincro):
             return
 
         page = context.new_page()
-        Stealth().apply_stealth_sync(page) # Activar modo sigilo
+        stealth_sync(page) # Activar modo sigilo
         
 
         try:
