@@ -208,20 +208,47 @@ function GoodreadsSync:syncProgress()
         local titulo = escapeJSON(props.title or "Desconocido")
         local autor = escapeJSON(props.authors or "Desconocido")
         
-        -- Obtener página actual y total (manejar modo scroll)
+        -- Obtener página actual y total correctamente
         local pag, total
+        
+        -- Para documentos PDF o con páginas fijas (paging mode)
         if self.ui.paging then
-            pag = self.ui.paging:getCurrentPage()
-            total = doc:getPageCount()
+            pag = self.ui.paging.current_page or 1
+            total = self.ui.document:getPageCount() or 1
+            
+        -- Para EPUB u otros documentos reflowables (rolling mode)
         elseif self.ui.rolling then
-            -- Modo scroll: usar porcentaje
-            local pos = self.ui.rolling:getLastPercent()
-            total = 100
-            pag = math.floor(pos)
+            -- Obtener el view (ReaderView)
+            local view = self.ui.view
+            if view and view.state then
+                -- state.page contiene el número de página actual
+                pag = view.state.page or 1
+                -- Obtener el número total de páginas del documento
+                total = self.ui.document:getPageCount() or 100
+                
+                -- Asegurarse de que los valores sean válidos
+                if pag > total then
+                    pag = total
+                end
+            else
+                -- Fallback: intentar obtener de estadísticas
+                local stats = self.ui.doc_settings:readSetting("stats") or {}
+                pag = stats.page or 1
+                total = self.ui.document:getPageCount() or 100
+            end
         else
-            -- Fallback
+            -- Último fallback
             pag = 1
-            total = 100
+            total = self.ui.document:getPageCount() or 100
+        end
+        
+        -- Asegurar que los valores sean números válidos
+        pag = tonumber(pag) or 1
+        total = tonumber(total) or 100
+        
+        -- Asegurar que pag no sea mayor que total
+        if pag > total then
+            pag = total
         end
         
         local body = '{"user_id":"' .. self.settings.user_id .. '",'
