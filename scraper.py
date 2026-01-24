@@ -308,25 +308,56 @@ def run_scraper(data: LibroSincro):
                     if cr_btn:
                         print("INFO: Botón 'Currently Reading' encontrado. Haciendo click...")
                         cr_btn.click()
+                        print("INFO: Esperando respuesta del servidor después del click...")
+                        
+                        # Esperar a que Goodreads procese el cambio (networkidle es clave)
+                        page.wait_for_load_state("networkidle", timeout=10000)
                         page.wait_for_timeout(2000)
                         print("INFO: Marcado como Currently Reading.")
                         
-                        # Intentar actualizar páginas ahora
-                        # Recargar selectores y forzar visualización del formulario
-                        status_btn_new = element.query_selector('.wtrStatusReadingNow')
-                        if status_btn_new:
-                            # Forzar visualización del formulario de progreso
-                            element.evaluate('''(el) => {
-                                const floatingBox = el.querySelector('.wtrFloatingBox.wtrNewUserStatus');
-                                if (floatingBox) {
-                                    floatingBox.style.display = 'block';
-                                    floatingBox.style.visibility = 'visible';
-                                }
-                            }''')
-                            page.wait_for_timeout(1500)
-                            prep = prepare_form_js(page, element)
-                            if prep['success']:
-                                update_pages_js(page, element, data, prep['totalPages'])
+                        # CRITICAL: Re-obtener el elemento completo porque el DOM cambió
+                        print("INFO: Re-obteniendo elemento del DOM actualizado...")
+                        selector_base = "tr[itemtype*='Book']" if best_match['is_table'] else "li.book"
+                        
+                        # Re-obtener el elemento usando el mismo índice
+                        element_refreshed = page.evaluate_handle(f'document.querySelectorAll("{selector_base}")[{best_match["index"]}]').as_element()
+                        
+                        if not element_refreshed:
+                            print("ERROR: No se pudo re-obtener el elemento después del cambio.")
+                        else:
+                            print("INFO: Elemento re-obtenido exitosamente.")
+                            
+                            # Verificar que ahora esté en Currently Reading
+                            status_btn_new = element_refreshed.query_selector('.wtrStatusReadingNow')
+                            if status_btn_new:
+                                print("INFO: Confirmado - libro ahora en Currently Reading.")
+                                
+                                # Forzar visualización del formulario de progreso
+                                print("INFO: Forzando visualización del formulario de progreso...")
+                                element_refreshed.evaluate('''(el) => {
+                                    const floatingBox = el.querySelector('.wtrFloatingBox.wtrNewUserStatus');
+                                    if (floatingBox) {
+                                        floatingBox.style.display = 'block';
+                                        floatingBox.style.visibility = 'visible';
+                                    }
+                                }''')
+                                page.wait_for_timeout(1000)
+                                
+                                # Preparar y actualizar páginas
+                                print("INFO: Preparando formulario...")
+                                prep = prepare_form_js(page, element_refreshed)
+                                if prep['success']:
+                                    print(f"INFO: Formulario preparado. Total páginas GR: {prep['totalPages']}")
+                                    update_pages_js(page, element_refreshed, data, prep['totalPages'])
+                                else:
+                                    print(f"WARNING: No se pudo preparar formulario: {prep.get('error', 'Unknown')}")
+                            else:
+                                print("WARNING: No se encontró .wtrStatusReadingNow después de refrescar elemento.")
+                                # Debug
+                                html_debug = element_refreshed.evaluate('el => el.innerHTML')
+                                with open('element_after_mark.html', 'w', encoding='utf-8') as f:
+                                    f.write(html_debug)
+                                print("DEBUG: HTML guardado en element_after_mark.html")
                     else:
                         print("WARNING: Botón Currently Reading no encontrado en menú.")
                         # Debug: imprimir HTML del elemento
