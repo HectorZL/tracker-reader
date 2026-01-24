@@ -303,14 +303,34 @@ def run_scraper(data: LibroSincro):
                     
                     page.wait_for_timeout(500)
                     
-                    # Ahora buscar el botón "currently-reading"
-                    cr_btn = element.query_selector('button[value="currently-reading"]')
-                    if cr_btn:
-                        print("INFO: Botón 'Currently Reading' encontrado. Haciendo click...")
-                        cr_btn.click()
-                        print("INFO: Esperando respuesta del servidor después del click...")
+                    # Ahora llenar el formulario oculto y hacer submit (la forma correcta)
+                    print("INFO: Llenando formulario y haciendo submit...")
+                    submit_success = element.evaluate('''(el) => {
+                        try {
+                            // Buscar el formulario oculto
+                            const hiddenForm = el.querySelector('form.hiddenShelfForm');
+                            if (!hiddenForm) return false;
+                            
+                            // Llenar el campo 'name' con 'currently-reading'
+                            const nameInput = hiddenForm.querySelector('input[name="name"]');
+                            if (nameInput) {
+                                nameInput.value = 'currently-reading';
+                            }
+                            
+                            // Hacer submit del formulario
+                            hiddenForm.submit();
+                            return true;
+                        } catch (e) {
+                            console.error('Error submitting form:', e);
+                            return false;
+                        }
+                    }''')
+                    
+                    if submit_success:
+                        print("INFO: Formulario enviado exitosamente.")
                         
                         # Esperar a que Goodreads procese el cambio (networkidle es clave)
+                        print("INFO: Esperando respuesta del servidor después del submit...")
                         page.wait_for_load_state("networkidle", timeout=10000)
                         page.wait_for_timeout(2000)
                         print("INFO: Marcado como Currently Reading.")
@@ -359,8 +379,7 @@ def run_scraper(data: LibroSincro):
                                     f.write(html_debug)
                                 print("DEBUG: HTML guardado en element_after_mark.html")
                     else:
-                        print("WARNING: Botón Currently Reading no encontrado en menú.")
-                        # Debug: imprimir HTML del elemento
+                        print("WARNING: No se pudo enviar el formulario. Intentando click alternativo...")
                         html_debug = element.evaluate('el => el.innerHTML')
                         with open('element_debug.html', 'w', encoding='utf-8') as f:
                             f.write(html_debug)
