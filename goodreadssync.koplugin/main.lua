@@ -173,6 +173,17 @@ function GoodreadsSync:showStatus()
     })
 end
 
+-- Escapar caracteres especiales para JSON
+local function escapeJSON(str)
+    if not str then return "" end
+    str = str:gsub('\\', '\\\\')
+    str = str:gsub('"', '\\"')
+    str = str:gsub('\n', '\\n')
+    str = str:gsub('\r', '\\r')
+    str = str:gsub('\t', '\\t')
+    return str
+end
+
 function GoodreadsSync:syncProgress()
     if not self.settings.user_id then
         UIManager:show(InfoMessage:new{
@@ -191,26 +202,50 @@ function GoodreadsSync:syncProgress()
         return
     end
     
-    local props = doc:getProps()
-    local titulo = props.title or "?"
-    local autor = props.authors or "?"
-    local pag = self.ui.paging:getCurrentPage()
-    local total = doc:getPageCount()
+    -- Usar pcall para capturar errores
+    local success, error_msg = pcall(function()
+        local props = doc:getProps()
+        local titulo = escapeJSON(props.title or "Desconocido")
+        local autor = escapeJSON(props.authors or "Desconocido")
+        
+        -- Obtener página actual y total (manejar modo scroll)
+        local pag, total
+        if self.ui.paging then
+            pag = self.ui.paging:getCurrentPage()
+            total = doc:getPageCount()
+        elseif self.ui.rolling then
+            -- Modo scroll: usar porcentaje
+            local pos = self.ui.rolling:getLastPercent()
+            total = 100
+            pag = math.floor(pos)
+        else
+            -- Fallback
+            pag = 1
+            total = 100
+        end
+        
+        local body = '{"user_id":"' .. self.settings.user_id .. '",'
+        body = body .. '"titulo":"' .. titulo .. '",'
+        body = body .. '"autor":"' .. autor .. '",'
+        body = body .. '"isbn":"",'
+        body = body .. '"pagina_actual":' .. tostring(pag) .. ','
+        body = body .. '"total_paginas":' .. tostring(total) .. ','
+        body = body .. '"dispositivo":"KOReader"}'
+        
+        self:httpPost(API_URL .. "/sync", body)
+    end)
     
-    local body = '{"user_id":"' .. self.settings.user_id .. '",'
-    body = body .. '"titulo":"' .. titulo .. '",'
-    body = body .. '"autor":"' .. autor .. '",'
-    body = body .. '"isbn":"",'
-    body = body .. '"pagina_actual":' .. pag .. ','
-    body = body .. '"total_paginas":' .. total .. ','
-    body = body .. '"dispositivo":"KOReader"}'
-    
-    local resp, code = self:httpPost(API_URL .. "/sync", body)
-    
-    UIManager:show(InfoMessage:new{
-        text = "Sincronizando:\n" .. titulo .. "\nPag " .. pag .. "/" .. total,
-        timeout = 2,
-    })
+    if success then
+        UIManager:show(InfoMessage:new{
+            text = "Sincronizado OK",
+            timeout = 2,
+        })
+    else
+        UIManager:show(InfoMessage:new{
+            text = "Error: " .. tostring(error_msg),
+            timeout = 3,
+        })
+    end
 end
 
 function GoodreadsSync:onCloseDocument()
