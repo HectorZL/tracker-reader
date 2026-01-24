@@ -249,10 +249,32 @@ def run_scraper(data: LibroSincro):
                 
                 if status_btn:
                     print("INFO: Ya en 'Currently Reading'.")
-                    # Hover para mostrar el formulario (o sobre el contenedor si existe)
-                    wtr_down = element.query_selector('.wtrDown')
-                    if wtr_down: wtr_down.hover()
-                    else: status_btn.hover()
+                    
+                    # FORZAR visualización del formulario de progreso con JavaScript (para modo headless)
+                    form_visible = element.evaluate('''(el) => {
+                        const floatingBox = el.querySelector('.wtrFloatingBox.wtrNewUserStatus');
+                        const prompt = el.querySelector('.wtrPrompt.wtrUserStatusPrompt');
+                        
+                        if (floatingBox) {
+                            floatingBox.style.display = 'block';
+                            floatingBox.style.visibility = 'visible';
+                            return true;
+                        }
+                        
+                        if (prompt) {
+                            prompt.style.display = 'block';
+                            prompt.style.visibility = 'visible';
+                            return true;
+                        }
+                        
+                        return false;
+                    }''')
+                    
+                    if form_visible:
+                        print("INFO: Formulario de progreso forzado a visible.")
+                    else:
+                        print("WARNING: No se encontró formulario de progreso.")
+                    
                     page.wait_for_timeout(1000)
                     
                     # Preparar JS
@@ -263,30 +285,55 @@ def run_scraper(data: LibroSincro):
                         print(f"WARNING: No se pudo preparar formulario: {prep_result['error']}")
                 else:
                     print("INFO: No está en lectura. Marcando...")
-                    shelf_btn = element.query_selector('.wtrShelfButton')
-                    if shelf_btn:
-                        shelf_btn.click()
-                        page.wait_for_timeout(1000)
+                    
+                    # FORZAR visualización del menú desplegable con JavaScript (para modo headless)
+                    menu_visible = element.evaluate('''(el) => {
+                        const menu = el.querySelector('.wtrShelfMenu');
+                        if (menu) {
+                            menu.style.display = 'block';
+                            menu.style.visibility = 'visible';
+                            menu.style.opacity = '1';
+                            return true;
+                        }
+                        return false;
+                    }''')
+                    
+                    if not menu_visible:
+                        print("WARNING: No se pudo forzar la visualización del menú.")
+                    
+                    page.wait_for_timeout(500)
+                    
+                    # Ahora buscar el botón "currently-reading"
+                    cr_btn = element.query_selector('button[value="currently-reading"]')
+                    if cr_btn:
+                        print("INFO: Botón 'Currently Reading' encontrado. Haciendo click...")
+                        cr_btn.click()
+                        page.wait_for_timeout(2000)
+                        print("INFO: Marcado como Currently Reading.")
                         
-                        cr_btn = element.query_selector('button[value="currently-reading"]')
-                        if cr_btn:
-                            cr_btn.click()
-                            page.wait_for_timeout(2000)
-                            print("INFO: Marcado como Currently Reading.")
-                            
-                            # Intentar actualizar páginas ahora
-                            # Recargar selectores
-                            status_btn_new = element.query_selector('.wtrStatusReadingNow')
-                            if status_btn_new:
-                                status_btn_new.hover()
-                                page.wait_for_timeout(1500)
-                                prep = prepare_form_js(page, element)
-                                if prep['success']:
-                                    update_pages_js(page, element, data, prep['totalPages'])
-                        else:
-                            print("WARNING: Botón Currently Reading no encontrado en menú.")
+                        # Intentar actualizar páginas ahora
+                        # Recargar selectores y forzar visualización del formulario
+                        status_btn_new = element.query_selector('.wtrStatusReadingNow')
+                        if status_btn_new:
+                            # Forzar visualización del formulario de progreso
+                            element.evaluate('''(el) => {
+                                const floatingBox = el.querySelector('.wtrFloatingBox.wtrNewUserStatus');
+                                if (floatingBox) {
+                                    floatingBox.style.display = 'block';
+                                    floatingBox.style.visibility = 'visible';
+                                }
+                            }''')
+                            page.wait_for_timeout(1500)
+                            prep = prepare_form_js(page, element)
+                            if prep['success']:
+                                update_pages_js(page, element, data, prep['totalPages'])
                     else:
-                        print("WARNING: Botón de estante no encontrado.")
+                        print("WARNING: Botón Currently Reading no encontrado en menú.")
+                        # Debug: imprimir HTML del elemento
+                        html_debug = element.evaluate('el => el.innerHTML')
+                        with open('element_debug.html', 'w', encoding='utf-8') as f:
+                            f.write(html_debug)
+                        print("DEBUG: HTML del elemento guardado en element_debug.html")
             else:
                 print(f"ERROR: No se encontró libro coincidente.")
 
