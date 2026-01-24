@@ -44,6 +44,7 @@ async def sync_progress(libro: LibroSincro, background_tasks: BackgroundTasks):
     """
     Sincroniza el progreso de lectura con Goodreads.
     Requiere un user_id válido obtenido en /login.
+    Ejecuta DOS VECES: (1) Marcar libro, (2) Actualizar progreso.
     """
     # 1. Validaciones de Datos
     if libro.pagina_actual < 0 or libro.total_paginas <= 0:
@@ -58,16 +59,30 @@ async def sync_progress(libro: LibroSincro, background_tasks: BackgroundTasks):
             detail="Sesión no encontrada o expirada. Por favor realiza /login nuevamente."
         )
     
-    # 3. Ejecución en Background usando el executor
-    # Ejecutamos run_scraper en un thread del pool para evitar bloquear asyncio
-    loop = asyncio.get_event_loop()
-    background_tasks.add_task(loop.run_in_executor, executor, run_scraper, libro)
+    # 3. Ejecución DOBLE en Background usando el executor
+    # PRIMERA ejecución: Marca el libro como "Currently Reading"
+    # SEGUNDA ejecución: Actualiza el progreso de páginas
+    async def execute_double_sync():
+        loop = asyncio.get_event_loop()
+        print("\n" + "="*60)
+        print("SYNC 1/2: Marcando libro como Currently Reading")
+        print("="*60)
+        await loop.run_in_executor(executor, run_scraper, libro)
+        
+        print("\n" + "="*60)
+        print("SYNC 2/2: Actualizando progreso de lectura")
+        print("="*60)
+        await loop.run_in_executor(executor, run_scraper, libro)
+        print("\n✅ Sincronización completa (2/2)")
+    
+    # Ejecutar en background
+    background_tasks.add_task(execute_double_sync)
     
     return {
         "status": "received", 
         "book": libro.titulo, 
         "user_id": libro.user_id,
-        "message": "Sincronización iniciada en segundo plano"
+        "message": "Sincronización iniciada (se ejecutará 2 veces automáticamente)"
     }
 
 @app.get("/ping")
