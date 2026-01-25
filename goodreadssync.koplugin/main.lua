@@ -259,13 +259,40 @@ function GoodreadsSync:syncProgress()
         body = body .. '"total_paginas":' .. tostring(total) .. ','
         body = body .. '"dispositivo":"KOReader"}'
         
-        self:httpPost(API_URL .. "/sync", body)
+        -- Hacer la petición y guardar la respuesta
+        local resp, code = self:httpPost(API_URL .. "/sync", body)
+        return resp, code
     end)
     
     if success then
+        local resp = error_msg  -- En pcall exitoso, error_msg contiene el primer valor retornado
+        local message = "Sincronizado OK"
+        
+        if resp and type(resp) == "string" then
+            -- Intentar parsear la respuesta JSON
+            local updated = resp:match('"updated"%s*:%s*(%w+)')
+            local reason = resp:match('"reason"%s*:%s*"([^"]*)"')
+            local server_msg = resp:match('"message"%s*:%s*"([^"]*)"')
+            local gr_percent = resp:match('"gr_progress".-"percent"%s*:%s*(%d+)')
+            local gr_page_eq = resp:match('"page_equivalent_kr"%s*:%s*(%d+)')
+            
+            if updated == "false" and reason == "gr_ahead" then
+                -- Goodreads tiene mayor progreso
+                message = "GR tiene mayor progreso\n"
+                if gr_percent then
+                    message = message .. "GR: " .. gr_percent .. "%"
+                end
+                if gr_page_eq then
+                    message = message .. "\n(Pág " .. gr_page_eq .. " de tu libro)"
+                end
+            elseif server_msg then
+                message = server_msg
+            end
+        end
+        
         UIManager:show(InfoMessage:new{
-            text = "Sincronizado OK",
-            timeout = 2,
+            text = message,
+            timeout = 3,
         })
     else
         UIManager:show(InfoMessage:new{

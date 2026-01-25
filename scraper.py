@@ -35,6 +35,21 @@ def normalize_text(text: str) -> str:
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
+# Variable global para almacenar el resultado de la última sincronización
+_last_sync_result = None
+
+def get_last_sync_result():
+    """Obtiene el resultado de la última sincronización y lo limpia"""
+    global _last_sync_result
+    result = _last_sync_result
+    _last_sync_result = None  # Limpiar después de leer
+    return result
+
+def set_sync_result(result):
+    """Establece el resultado de la sincronización"""
+    global _last_sync_result
+    _last_sync_result = result
+
 def do_login(user: UserLogin) -> str:
     """
     Realiza login en Goodreads y guarda la sesión en session_file.
@@ -349,12 +364,86 @@ def run_scraper(data: LibroSincro):
                     
                     page.wait_for_timeout(1000)
                     
-                    # Preparar JS
+                    # Preparar JS y extraer progreso actual de Goodreads
                     prep_result = prepare_form_js(page, element)
                     if prep_result['success']:
-                        update_pages_js(page, element, data, prep_result['totalPages'])
+                        gr_total_pages = prep_result['totalPages']
+                        
+                        # Extraer progreso ACTUAL de Goodreads antes de actualizar
+                        current_gr_progress = element.evaluate('''(el) => {
+                            // Buscar el input de porcentaje actual
+                            const percentInput = el.querySelector('input[name="user_status[percent]"]');
+                            const pageInput = el.querySelector('input[name="user_status[page]"]');
+                            
+                            let currentPercent = 0;
+                            let currentPage = 0;
+                            
+                            if (percentInput && percentInput.value) {
+                                currentPercent = parseInt(percentInput.value) || 0;
+                            }
+                            
+                            if (pageInput && pageInput.value) {
+                                currentPage = parseInt(pageInput.value) || 0;
+                            }
+                            
+                            return {
+                                percent: currentPercent,
+                                page: currentPage
+                            };
+                        }''')
+                        
+                        print(f"DEBUG: Progreso actual en GR: {current_gr_progress}")
+                        
+                        # Calcular porcentaje de KOReader
+                        kr_percent = (data.pagina_actual / data.total_paginas) * 100 if data.total_paginas > 0 else 0
+                        
+                        # Calcular página equivalente de GR en términos del libro de KOReader
+                        gr_percent = current_gr_progress.get('percent', 0)
+                        gr_page_equivalent_kr = int((gr_percent / 100) * data.total_paginas) if gr_percent > 0 else 0
+                        
+                        print(f"DEBUG: KR está en {data.pagina_actual}/{data.total_paginas} ({kr_percent:.1f}%)")
+                        print(f"DEBUG: GR está en {gr_percent}% (equivale a pág {gr_page_equivalent_kr} de tu libro)")
+                        
+                        # Comparar progreso: ¿KOReader tiene mayor progreso?
+                        if kr_percent < gr_percent:
+                            # Goodreads tiene mayor progreso, NO actualizar
+                            print(f"INFO: ⚠️ Goodreads tiene mayor progreso ({gr_percent}% vs {kr_percent:.1f}%). NO se actualizará.")
+                            
+                            # Preparar resultado para devolver a la API
+                            result = {
+                                "updated": False,
+                                "reason": "gr_ahead",
+                                "gr_percent": gr_percent,
+                                "gr_page_equivalent_kr": gr_page_equivalent_kr,
+                                "kr_percent": round(kr_percent, 1),
+                                "kr_page": data.pagina_actual,
+                                "kr_total": data.total_paginas,
+                                "gr_total_pages": gr_total_pages,
+                                "message": f"Goodreads tiene mayor progreso: {gr_percent}% (equivale a página {gr_page_equivalent_kr} de tu libro)"
+                            }
+                            
+                            # Guardar resultado en variable global para que main.py pueda acceder
+                            global _last_sync_result
+                            _last_sync_result = result
+                        else:
+                            # KOReader tiene igual o mayor progreso, actualizar normalmente
+                            update_pages_js(page, element, data, gr_total_pages)
+                            
+                            # Calcular página final en GR
+                            final_gr_page = int((data.pagina_actual / data.total_paginas) * gr_total_pages) if data.total_paginas > 0 else 0
+                            
+                            result = {
+                                "updated": True,
+                                "reason": "success",
+                                "gr_page": final_gr_page,
+                                "gr_total_pages": gr_total_pages,
+                                "kr_page": data.pagina_actual,
+                                "kr_total": data.total_paginas,
+                                "message": f"Sincronizado: página {final_gr_page} de {gr_total_pages}"
+                            }
+                            _last_sync_result = result
                     else:
-                        print(f"WARNING: No se pudo preparar formulario: {prep_result['error']}")
+                        print(f"WARNING: No se pudo preparar formulario: {prep_result.get('error', 'Unknown')}")
                 else:
                     print("INFO: No está en lectura. Marcando...")
                     
