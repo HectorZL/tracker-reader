@@ -40,17 +40,15 @@ async def login(user: UserLogin):
         raise HTTPException(status_code=401, detail=f"Login fallido: {str(e)}")
 
 @app.post("/sync")
-async def sync_progress(libro: LibroSincro):
+async def sync_progress(libro: LibroSincro, background_tasks: BackgroundTasks):
     """
     Sincroniza el progreso de lectura con Goodreads.
     Requiere un user_id válido obtenido en /login.
-    Ejecuta DOS VECES: (1) Marcar libro, (2) Actualizar progreso.
+    Ejecuta DOS VECES en background: (1) Marcar libro, (2) Actualizar progreso.
     
-    Retorna información sobre el estado de la sincronización, incluyendo
-    si Goodreads ya tenía un progreso mayor.
+    La API compara el progreso de Goodreads vs KOReader y solo actualiza
+    si KOReader tiene mayor progreso.
     """
-    from scraper import get_last_sync_result
-    
     # 1. Validaciones de Datos
     if libro.pagina_actual < 0 or libro.total_paginas <= 0:
         raise HTTPException(status_code=400, detail="Número de páginas inválido")
@@ -64,51 +62,30 @@ async def sync_progress(libro: LibroSincro):
             detail="Sesión no encontrada o expirada. Por favor realiza /login nuevamente."
         )
     
-    # 3. Ejecutar sincronización de forma SÍNCRONA para poder devolver el resultado
-    loop = asyncio.get_event_loop()
+    # 3. Ejecutar sincronización en BACKGROUND (responde inmediatamente al cliente)
+    async def execute_double_sync():
+        loop = asyncio.get_event_loop()
+        print("\n" + "="*60)
+        print("SYNC 1/2: Marcando libro como Currently Reading")
+        print("="*60)
+        await loop.run_in_executor(executor, run_scraper, libro)
+        
+        print("\n" + "="*60)
+        print("SYNC 2/2: Actualizando progreso de lectura")
+        print("="*60)
+        await loop.run_in_executor(executor, run_scraper, libro)
+        print("\n✅ Sincronización completa (2/2)")
     
-    print("\n" + "="*60)
-    print("SYNC 1/2: Marcando libro como Currently Reading")
-    print("="*60)
-    await loop.run_in_executor(executor, run_scraper, libro)
+    # Agregar tarea en background
+    background_tasks.add_task(execute_double_sync)
     
-    print("\n" + "="*60)
-    print("SYNC 2/2: Actualizando progreso de lectura")
-    print("="*60)
-    await loop.run_in_executor(executor, run_scraper, libro)
-    print("\n✅ Sincronización completa (2/2)")
-    
-    # 4. Obtener resultado de la sincronización
-    sync_result = get_last_sync_result()
-    
-    if sync_result:
-        return {
-            "status": "completed",
-            "book": libro.titulo,
-            "user_id": libro.user_id,
-            "updated": sync_result.get("updated", True),
-            "reason": sync_result.get("reason", "unknown"),
-            "gr_progress": {
-                "percent": sync_result.get("gr_percent", 0),
-                "page": sync_result.get("gr_page", 0),
-                "total_pages": sync_result.get("gr_total_pages", 0),
-                "page_equivalent_kr": sync_result.get("gr_page_equivalent_kr", 0)
-            },
-            "kr_progress": {
-                "page": sync_result.get("kr_page", libro.pagina_actual),
-                "total_pages": sync_result.get("kr_total", libro.total_paginas)
-            },
-            "message": sync_result.get("message", "Sincronización completada")
-        }
-    else:
-        # Fallback si no hay resultado
-        return {
-            "status": "completed", 
-            "book": libro.titulo, 
-            "user_id": libro.user_id,
-            "updated": True,
-            "message": "Sincronización completada"
-        }
+    # Responder inmediatamente
+    return {
+        "status": "received", 
+        "book": libro.titulo, 
+        "user_id": libro.user_id,
+        "message": "Sincronización iniciada en background"
+    }
 
 @app.get("/ping")
 async def ping():

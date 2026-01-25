@@ -4,6 +4,7 @@ local InfoMessage = require("ui/widget/infomessage")
 local InputDialog = require("ui/widget/inputdialog")
 local https = require("ssl.https")
 local ltn12 = require("ltn12")
+local socket = require("socket")
 local _ = require("gettext")
 
 local API_URL = "https://tracker-reader.onrender.com"
@@ -101,6 +102,7 @@ function GoodreadsSync:showPasswordDialog(email)
     pass_dialog:onShowKeyboard()
 end
 
+-- Petición HTTP normal (bloqueante, para login)
 function GoodreadsSync:httpPost(url, body)
     local response_body = {}
     local res, code, headers, status = https.request{
@@ -122,6 +124,31 @@ function GoodreadsSync:httpPost(url, body)
     else
         return nil, tostring(code)
     end
+end
+
+-- Petición HTTP "fire and forget" - envía y no espera respuesta
+function GoodreadsSync:httpPostAsync(url, body)
+    -- Usar timeout muy corto para no bloquear
+    -- La API procesará la petición aunque cerremos la conexión
+    local response_body = {}
+    
+    -- Enviar petición con timeout mínimo
+    https.request{
+        url = url,
+        method = "POST",
+        headers = {
+            ["Content-Type"] = "application/json",
+            ["Content-Length"] = tostring(#body)
+        },
+        source = ltn12.source.string(body),
+        sink = ltn12.sink.table(response_body),
+        protocol = "any",
+        options = "all",
+        verify = "none",
+        -- No esperamos respuesta, solo enviamos
+    }
+    
+    return true
 end
 
 function GoodreadsSync:doLogin(email, password)
@@ -202,104 +229,65 @@ function GoodreadsSync:syncProgress()
         return
     end
     
-    -- Usar pcall para capturar errores
-    local success, error_msg = pcall(function()
-        local props = doc:getProps()
-        local titulo = escapeJSON(props.title or "Desconocido")
-        local autor = escapeJSON(props.authors or "Desconocido")
-        
-        -- Obtener página actual y total correctamente
-        local pag, total
-        
-        -- Para documentos PDF o con páginas fijas (paging mode)
-        if self.ui.paging then
-            pag = self.ui.paging.current_page or 1
-            total = self.ui.document:getPageCount() or 1
-            
-        -- Para EPUB u otros documentos reflowables (rolling mode)
-        elseif self.ui.rolling then
-            -- Obtener el view (ReaderView)
-            local view = self.ui.view
-            if view and view.state then
-                -- state.page contiene el número de página actual
-                pag = view.state.page or 1
-                -- Obtener el número total de páginas del documento
-                total = self.ui.document:getPageCount() or 100
-                
-                -- Asegurarse de que los valores sean válidos
-                if pag > total then
-                    pag = total
-                end
-            else
-                -- Fallback: intentar obtener de estadísticas
-                local stats = self.ui.doc_settings:readSetting("stats") or {}
-                pag = stats.page or 1
-                total = self.ui.document:getPageCount() or 100
+    -- Recopilar datos del libro
+    local props = doc:getProps()
+    local titulo = escapeJSON(props.title or "Desconocido")
+    local autor = escapeJSON(props.authors or "Desconocido")
+    
+    -- Obtener página actual y total
+    local pag, total
+    
+    if self.ui.paging then
+        pag = self.ui.paging.current_page or 1
+        total = self.ui.document:getPageCount() or 1
+    elseif self.ui.rolling then
+        local view = self.ui.view
+        if view and view.state then
+            pag = view.state.page or 1
+            total = self.ui.document:getPageCount() or 100
+            if pag > total then
+                pag = total
             end
         else
-            -- Último fallback
-            pag = 1
+            local stats = self.ui.doc_settings:readSetting("stats") or {}
+            pag = stats.page or 1
             total = self.ui.document:getPageCount() or 100
         end
-        
-        -- Asegurar que los valores sean números válidos
-        pag = tonumber(pag) or 1
-        total = tonumber(total) or 100
-        
-        -- Asegurar que pag no sea mayor que total
-        if pag > total then
-            pag = total
-        end
-        
-        local body = '{"user_id":"' .. self.settings.user_id .. '",'
-        body = body .. '"titulo":"' .. titulo .. '",'
-        body = body .. '"autor":"' .. autor .. '",'
-        body = body .. '"isbn":"",'
-        body = body .. '"pagina_actual":' .. tostring(pag) .. ','
-        body = body .. '"total_paginas":' .. tostring(total) .. ','
-        body = body .. '"dispositivo":"KOReader"}'
-        
-        -- Hacer la petición y guardar la respuesta
-        local resp, code = self:httpPost(API_URL .. "/sync", body)
-        return resp, code
-    end)
-    
-    if success then
-        local resp = error_msg  -- En pcall exitoso, error_msg contiene el primer valor retornado
-        local message = "Sincronizado OK"
-        
-        if resp and type(resp) == "string" then
-            -- Intentar parsear la respuesta JSON
-            local updated = resp:match('"updated"%s*:%s*(%w+)')
-            local reason = resp:match('"reason"%s*:%s*"([^"]*)"')
-            local server_msg = resp:match('"message"%s*:%s*"([^"]*)"')
-            local gr_percent = resp:match('"gr_progress".-"percent"%s*:%s*(%d+)')
-            local gr_page_eq = resp:match('"page_equivalent_kr"%s*:%s*(%d+)')
-            
-            if updated == "false" and reason == "gr_ahead" then
-                -- Goodreads tiene mayor progreso
-                message = "GR tiene mayor progreso\n"
-                if gr_percent then
-                    message = message .. "GR: " .. gr_percent .. "%"
-                end
-                if gr_page_eq then
-                    message = message .. "\n(Pág " .. gr_page_eq .. " de tu libro)"
-                end
-            elseif server_msg then
-                message = server_msg
-            end
-        end
-        
-        UIManager:show(InfoMessage:new{
-            text = message,
-            timeout = 3,
-        })
     else
-        UIManager:show(InfoMessage:new{
-            text = "Error: " .. tostring(error_msg),
-            timeout = 3,
-        })
+        pag = 1
+        total = self.ui.document:getPageCount() or 100
     end
+    
+    pag = tonumber(pag) or 1
+    total = tonumber(total) or 100
+    if pag > total then
+        pag = total
+    end
+    
+    local body = '{"user_id":"' .. self.settings.user_id .. '",'
+    body = body .. '"titulo":"' .. titulo .. '",'
+    body = body .. '"autor":"' .. autor .. '",'
+    body = body .. '"isbn":"",'
+    body = body .. '"pagina_actual":' .. tostring(pag) .. ','
+    body = body .. '"total_paginas":' .. tostring(total) .. ','
+    body = body .. '"dispositivo":"KOReader"}'
+    
+    -- Mostrar mensaje inmediatamente (sin esperar respuesta)
+    UIManager:show(InfoMessage:new{
+        text = _("Enviado!"),
+        timeout = 1,
+    })
+    
+    -- Guardar referencia a self
+    local self_ref = self
+    
+    -- Programar envío para el próximo ciclo (no bloquea la UI)
+    UIManager:scheduleIn(0.01, function()
+        -- Fire and forget: enviar y no esperar
+        pcall(function()
+            self_ref:httpPostAsync(API_URL .. "/sync", body)
+        end)
+    end)
 end
 
 function GoodreadsSync:onCloseDocument()
