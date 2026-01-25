@@ -7,10 +7,33 @@ from utils import prepare_form_js, update_pages_js
 import time
 import os
 from playwright_stealth import stealth_sync
+import unicodedata
+import re
 
 # Configuración Headless: Toma el valor de la variable de entorno o False por defecto
 HEADLESS = True
 MIN_CONFIDENCE = 60
+
+def normalize_text(text: str) -> str:
+    """
+    Normaliza texto para comparación:
+    - Quita tildes y acentos (é -> e, ñ -> n, etc.)
+    - Convierte a minúsculas
+    - Quita caracteres especiales excepto espacios y alfanuméricos
+    """
+    if not text:
+        return ""
+    # Descomponer caracteres unicode (é -> e + ´)
+    text = unicodedata.normalize('NFD', text)
+    # Quitar marcas diacríticas (tildes, acentos)
+    text = ''.join(c for c in text if unicodedata.category(c) != 'Mn')
+    # Convertir a minúsculas
+    text = text.lower()
+    # Quitar caracteres especiales (dejar solo alfanuméricos y espacios)
+    text = re.sub(r'[^a-z0-9\s]', ' ', text)
+    # Normalizar espacios múltiples
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
 
 def do_login(user: UserLogin) -> str:
     """
@@ -206,24 +229,29 @@ def run_scraper(data: LibroSincro):
             best_score = 0
             
             for candidate in candidates_data:
-                # Calcular Scores
+                # Calcular Scores - usar normalize_text para quitar tildes y caracteres especiales
                 cand_title = candidate['title']
                 cand_title_clean = cand_title.split('(')[0].strip()
                 
-                title_score = fuzz.token_set_ratio(data.titulo.lower(), cand_title_clean.lower())
-                author_score = fuzz.token_sort_ratio(autor_limpio.lower(), candidate['author'].lower())
+                # Normalizar textos para comparación (sin tildes ni caracteres especiales)
+                titulo_norm = normalize_text(data.titulo)
+                cand_title_norm = normalize_text(cand_title_clean)
+                autor_norm = normalize_text(autor_limpio)
+                cand_autor_norm = normalize_text(candidate['author'])
+                
+                title_score = fuzz.token_set_ratio(titulo_norm, cand_title_norm)
+                author_score = fuzz.token_sort_ratio(autor_norm, cand_autor_norm)
                 total_score = (title_score * 0.6) + (author_score * 0.4)
                 
-                # BONIFICAR coincidencia EXACTA de título (ignorando case)
-                if data.titulo.lower().strip() == cand_title_clean.lower().strip():
+                # BONIFICAR coincidencia EXACTA de título (normalizado)
+                if titulo_norm == cand_title_norm:
                     total_score += 15
                     print(f"   -> BONIFICANDO '{cand_title}' por coincidencia EXACTA de título")
                 
                 # PENALIZAR títulos que contienen nombres de autores
                 # (Estas suelen ser ediciones especiales como "Good Omens - Neil Gaiman & Terry Pratchett")
-                autor_palabras = autor_limpio.lower().split()
-                titulo_lower = cand_title.lower()
-                autores_en_titulo = sum(1 for palabra in autor_palabras if len(palabra) > 3 and palabra in titulo_lower)
+                autor_palabras = autor_norm.split()
+                autores_en_titulo = sum(1 for palabra in autor_palabras if len(palabra) > 3 and palabra in cand_title_norm)
                 if autores_en_titulo >= 2:
                     total_score -= 15
                     print(f"   -> Penalizando '{cand_title}' por tener nombres de autores en título")
@@ -231,7 +259,7 @@ def run_scraper(data: LibroSincro):
                 # PENALIZAR guías de estudio, scripts, companions, etc.
                 palabras_penalizadas = ['study guide', 'script book', 'companion', 'analysis', 'novel unit', 'articles on']
                 for palabra in palabras_penalizadas:
-                    if palabra in titulo_lower:
+                    if palabra in cand_title_norm:
                         total_score -= 20
                         print(f"   -> Penalizando '{cand_title}' por ser '{palabra}'")
                 
