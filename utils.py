@@ -152,11 +152,16 @@ def prepare_form_js(page: Page, container):
         for (let div of progressDivs) {
             const hasPageInput = div.querySelector('input[name="user_status[page]"]');
             if (hasPageInput) {
-                // Este es el div correcto, buscar "of XXX" en su texto
-                const divText = div.innerText || div.textContent || "";
+                // FORZAR VISIBILIDAD del div para poder leer su texto
+                div.style.display = 'block';
+                div.style.visibility = 'visible';
+                
+                // Usar textContent que funciona incluso en elementos ocultos
+                const divText = div.textContent || "";
                 console.log('DEBUG prepare_form: Texto del div con páginas:', divText);
                 
-                const match = divText.match(/of\\s+(\\d+)/);
+                // Regex corregida (sin doble escape - estamos en JS, no Python string)
+                const match = divText.match(/of\s+(\d+)/);
                 if (match) {
                     totalPages = parseInt(match[1]);
                     console.log('DEBUG prepare_form: ✅ Total páginas extraído:', totalPages);
@@ -166,13 +171,13 @@ def prepare_form_js(page: Page, container):
         }
         
         if (totalPages === 0) {
-            console.log('WARNING prepare_form: No se pudo extraer total de páginas, usando fallback');
-            // Fallback: buscar en todo el container
-            const text = container.innerText || "";
-            const match = text.match(/of\\s+(\\d+)/);
+            console.log('WARNING prepare_form: No se pudo extraer total de páginas, usando fallback...');
+            // Fallback: buscar en todo el HTML del container (incluyendo elementos ocultos)
+            const html = container.innerHTML || "";
+            const match = html.match(/of\s+(\d+)\./);
             if (match) {
                 totalPages = parseInt(match[1]);
-                console.log('DEBUG prepare_form: Total páginas (fallback):', totalPages);
+                console.log('DEBUG prepare_form: Total páginas (fallback HTML):', totalPages);
             }
         }
         

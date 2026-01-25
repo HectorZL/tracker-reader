@@ -149,8 +149,15 @@ def run_scraper(data: LibroSincro):
 
         try:
             # 1. Buscar Libro
-            query = f"{data.titulo} {data.autor}"
-            print(f"INFO: Buscando: '{data.titulo}' de '{data.autor}'")
+            # Limpiar autor: reemplazar saltos de línea por espacios (libros con múltiples autores)
+            autor_limpio = data.autor.replace('\n', ' ').replace('\r', ' ').strip()
+            # Tomar solo el primer autor para la búsqueda (más confiable)
+            primer_autor = autor_limpio.split(',')[0].strip() if ',' in autor_limpio else autor_limpio.split(' ')[0:2]
+            if isinstance(primer_autor, list):
+                primer_autor = ' '.join(primer_autor)
+            
+            query = f"{data.titulo} {primer_autor}"
+            print(f"INFO: Buscando: '{data.titulo}' de '{autor_limpio}' (query: '{primer_autor}')")
             page.goto(f"https://www.goodreads.com/search?q={query}")
             
             print("INFO: Esperando 5s carga...")
@@ -167,12 +174,28 @@ def run_scraper(data: LibroSincro):
                 for (let i = 0; i < Math.min(elements.length, 5); i++) {
                     const el = elements[i];
                     const titleEl = el.querySelector('.bookTitle span') || el.querySelector('.bookTitle');
-                    const authorEl = el.querySelector('.authorName span') || el.querySelector('.authorName');
+                    
+                    // Extraer TODOS los autores (libros con múltiples autores)
+                    const authorEls = el.querySelectorAll('.authorName span');
+                    let authors = [];
+                    if (authorEls.length > 0) {
+                        authorEls.forEach(a => {
+                            if (a.innerText && a.innerText.trim()) {
+                                authors.push(a.innerText.trim());
+                            }
+                        });
+                    } else {
+                        // Fallback: un solo autor
+                        const singleAuthor = el.querySelector('.authorName');
+                        if (singleAuthor && singleAuthor.innerText) {
+                            authors.push(singleAuthor.innerText.trim());
+                        }
+                    }
                     
                     results.push({
                         index: i,
                         title: titleEl ? titleEl.innerText : "",
-                        author: authorEl ? authorEl.innerText : "",
+                        author: authors.join(' '),  // Todos los autores separados por espacio
                         is_table: rows.length > 0
                     });
                 }
@@ -188,8 +211,29 @@ def run_scraper(data: LibroSincro):
                 cand_title_clean = cand_title.split('(')[0].strip()
                 
                 title_score = fuzz.token_set_ratio(data.titulo.lower(), cand_title_clean.lower())
-                author_score = fuzz.token_sort_ratio(data.autor.lower(), candidate['author'].lower())
+                author_score = fuzz.token_sort_ratio(autor_limpio.lower(), candidate['author'].lower())
                 total_score = (title_score * 0.6) + (author_score * 0.4)
+                
+                # BONIFICAR coincidencia EXACTA de título (ignorando case)
+                if data.titulo.lower().strip() == cand_title_clean.lower().strip():
+                    total_score += 15
+                    print(f"   -> BONIFICANDO '{cand_title}' por coincidencia EXACTA de título")
+                
+                # PENALIZAR títulos que contienen nombres de autores
+                # (Estas suelen ser ediciones especiales como "Good Omens - Neil Gaiman & Terry Pratchett")
+                autor_palabras = autor_limpio.lower().split()
+                titulo_lower = cand_title.lower()
+                autores_en_titulo = sum(1 for palabra in autor_palabras if len(palabra) > 3 and palabra in titulo_lower)
+                if autores_en_titulo >= 2:
+                    total_score -= 15
+                    print(f"   -> Penalizando '{cand_title}' por tener nombres de autores en título")
+                
+                # PENALIZAR guías de estudio, scripts, companions, etc.
+                palabras_penalizadas = ['study guide', 'script book', 'companion', 'analysis', 'novel unit', 'articles on']
+                for palabra in palabras_penalizadas:
+                    if palabra in titulo_lower:
+                        total_score -= 20
+                        print(f"   -> Penalizando '{cand_title}' por ser '{palabra}'")
                 
                 # Detección y Manejo de Sagas
                 import re
